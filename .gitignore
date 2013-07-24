@@ -1,0 +1,9 @@
+*~
+*.pyc
+*.so
+.settings/
+.project
+.cproject
+*/.cproject
+.metadata/
+.svn/

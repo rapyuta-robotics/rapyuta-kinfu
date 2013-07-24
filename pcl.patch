@@ -1,0 +1,14 @@
+diff --git a/pcl/CMakeLists.txt b/pcl/CMakeLists.txt
+index b76d8f8..1923d73 100644
+--- a/pcl/CMakeLists.txt
++++ b/pcl/CMakeLists.txt
+@@ -18,6 +18,9 @@ ExternalProject_Add( pcl_trunk
+              -DBUILD_CUDA=ON
+              -DBUILD_GPU=ON
+              -DBUILD_OPENNI=ON
++             -DBUILD_visualization=ON
++             -DBUILD_gpu_kinfu=ON
++             -DBUILD_gpu_kinfu_large_scale=ON
+              -DBUILD_TESTS=OFF
+              -DBUILD_apps=OFF
+              -DBUILD_examples=OFF

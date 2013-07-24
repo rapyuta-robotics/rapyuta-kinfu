@@ -1,0 +1,7 @@
+<launch>
+  <group ns="camera">
+    <node name="camera" pkg="rm_openni2_camera" type="camera" output="screen" />
+  </group>
+
+  <node name="kinfu_viewer" pkg="image_transport_viewer" type="viewer" args="/camera/kinfuLS/depth" output="screen" />
+</launch>

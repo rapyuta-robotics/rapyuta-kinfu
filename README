@@ -1,0 +1,81 @@
+Install CUDA
+============
+
+1) Get Installers from NVIDIA
+
+    Driver:
+        http://www.nvidia.com/Download/index.aspx?lang=en-us
+
+        Use lspci to get information about the available GPU
+
+    CUDA:
+        https://developer.nvidia.com/cuda-downloads
+
+2) Install Dependencies in host filesystem
+
+    sudo apt-get install build-essential freeglut3-dev libx11-dev libxmu-dev libxi-dev libgl1-mesa-glx libglu1-mesa libglu1-mesa-dev
+
+3) Run Installers in host filesystem
+
+    Driver:
+        sudo sh NVIDIA-Linux-x86_64-xxx.xx.run
+
+    CUDA:
+        sudo sh cuda_x.x.xx_linux_64_ubuntuxx.xx-x.run
+
+        Do not install the NVIDIA Accelerated Graphics Driver!
+    
+    sudo -s /bin/bash -c 'echo "/usr/local/cuda/lib64" > /etc/ld.so.conf.d/cuda.conf'
+    sudo -s /bin/bash -c 'echo "/usr/local/cuda/lib" >> /etc/ld.so.conf.d/cuda.conf'
+    sudo ldconfig
+
+4) Add upstart script ('nvidia.conf') to host filesystem
+
+5) Copy Installers to container filesystem
+
+6) Install Dependencies in container filesystem
+
+    sudo apt-get install build-essential freeglut3-dev libx11-dev libxmu-dev libxi-dev libgl1-mesa-glx libglu1-mesa libglu1-mesa-dev
+
+7) Run Installers in container filesystem
+
+    Driver:
+        sudo sh NVIDIA-Linux-x86_64-xxx.xx.run --no-kernel-module
+        
+        Disregard the failure of '/sbin/depmod -aq'.
+
+    CUDA:
+        sudo sh cuda_x.x.xx_linux_64_ubuntuxx.xx-x.run
+
+        Do not install the NVIDIA Accelerated Graphics Driver!
+    
+    sudo -s /bin/bash -c 'echo "/usr/local/cuda/lib64" > /etc/ld.so.conf.d/cuda.conf'
+    sudo -s /bin/bash -c 'echo "/usr/local/cuda/lib" >> /etc/ld.so.conf.d/cuda.conf'
+    sudo ldconfig
+
+
+Preparation
+===========
+
+1) Install Dependencies
+    
+    PCL & kinfu wrapper:
+      sudo apt-get install ros-groovy-tf ros-groovy-pcl-msgs ros-groovy-nodelet-core openni-dev libusb-1.0.0-dev libqhull-dev libeigen3-dev libflann-dev libvtk5-qt4-dev
+
+2) Get PCL
+
+    git clone https://github.com/ros-perception/perception_pcl.git -b groovy-unstable-devel
+
+3) Patch CMakeLists.txt
+
+    cd src/perception_pcl
+    patch -p1 < ../pcl.patch
+    cd ../..
+
+
+Installation
+============
+
+1) Make packages
+
+    catkin_make_isolated -DPCL_SRC=${PWD}/src/perception_pcl/pcl

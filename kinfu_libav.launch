@@ -1,0 +1,11 @@
+<launch>
+  <group ns="camera">
+    <node name="camera" pkg="rm_openni2_camera" type="camera" output="screen" />
+    <param name="depth/image_raw/libav_packet/codec" value="ffv1" />
+    <param name="depth/image_raw/libav_packet/pixel_format" value="gray16" />
+  </group>
+
+  <node name="kinfu_viewer" pkg="image_transport_viewer" type="viewer" args="/camera/kinfuLS/depth" output="screen" >
+    <param name="image_transport" value="libav" />
+  </node>
+</launch>
