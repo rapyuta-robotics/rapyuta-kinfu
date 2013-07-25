@@ -98,10 +98,9 @@ public:
 	KinFuLSApp(ros::NodeHandle &nh, const float vsz, const float shiftDistance,
 			const bool integrate_colors, const bool enable_texture_extraction,
 			const int snapshot_rate) :
-			frame_counter_(0), time_ms_(0), /* integrate_colors_(integrate_colors), */
-			enable_texture_extraction_(enable_texture_extraction), registration_(
-					false), snapshot_rate_(snapshot_rate), /* pcd_source_(false), */nh_(
-					nh)
+			frame_counter_(0), time_ms_(0), integrate_colors_(integrate_colors), enable_texture_extraction_(
+					enable_texture_extraction), registration_(false), snapshot_rate_(
+					snapshot_rate), nh_(nh)
 	{
 		init_kinfu(vsz, shiftDistance);
 		init_ros();
@@ -110,9 +109,6 @@ public:
 private:
 	void init_kinfu(const float vsz, const float shiftDistance)
 	{
-		//Init Kinfu Tracker
-		Eigen::Vector3f volume_size = Eigen::Vector3f::Constant(vsz/*meters*/);
-
 		ROS_INFO("--- CURRENT SETTINGS ---\n");
 		ROS_INFO("Volume size is set to %.2f meters\n", vsz);
 		ROS_INFO(
@@ -126,15 +122,19 @@ private:
 			ROS_WARN(
 					"WARNING Shifting distance (%.2f) is very large compared to the volume size (%.2f).\nYou can modify it using --shifting_distance.\n", shiftDistance, vsz);
 
-		kinfu_ = boost::make_shared<pcl::gpu::kinfuLS::KinfuTracker>(
-				volume_size, shiftDistance);
+		const Eigen::Vector3f volume_size = Eigen::Vector3f::Constant(
+				vsz/*meters*/);
 
-		Eigen::Matrix3f R = Eigen::Matrix3f::Identity(); // * AngleAxisf(pcl::deg2rad(-30.f), Vector3f::UnitX());
-		Eigen::Vector3f t = volume_size * 0.5f
+		const Eigen::Matrix3f R = Eigen::Matrix3f::Identity(); // * AngleAxisf(pcl::deg2rad(-30.f), Vector3f::UnitX());
+		const Eigen::Vector3f t = volume_size * 0.5f
 				- Eigen::Vector3f(0, 0, volume_size(2) / 2 * 1.2f);
 
-		Eigen::Affine3f pose = Eigen::Translation3f(t) * Eigen::AngleAxisf(R);
+		const Eigen::Affine3f pose = Eigen::Translation3f(t)
+				* Eigen::AngleAxisf(R);
 
+		// init Kinfu Tracker
+		kinfu_ = boost::make_shared<pcl::gpu::kinfuLS::KinfuTracker>(
+				volume_size, shiftDistance);
 		kinfu_->setInitialCameraPose(pose);
 		kinfu_->volume().setTsdfTruncDist(0.030f/*meters*/);
 		kinfu_->setIcpCorespFilteringParams(0.1f/*meters*/,
@@ -154,7 +154,7 @@ private:
 		pub_kinfu_reset_ = nh.advertise<std_msgs::Empty>("/kinfu_reset", 2);
 		pub_scene_ = it.advertise("/camera/kinfuLS/depth", 10);
 
-		if (enable_texture_extraction_)
+		if (integrate_colors_ || enable_texture_extraction_)
 		{
 			sub_depth_ = boost::shared_ptr<image_transport::SubscriberFilter>(
 					new image_transport::SubscriberFilter(it,
@@ -171,7 +171,7 @@ private:
 			//hence the depth and rgb images normally do not have the EXACT timestamp
 			//so use approximate time policy for synchronization
 			texture_sync_ = boost::shared_ptr<DRGBSync>(
-					new DRGBSync(DRGBSyncPolicy(500), *sub_depth_, *sub_info_,
+					new DRGBSync(DRGBSyncPolicy(300), *sub_depth_, *sub_info_,
 							*sub_rgb_));
 			texture_sync_->registerCallback(
 					boost::bind(&KinFuLSApp::execute, this, _1, _2, _3));
@@ -188,7 +188,7 @@ private:
 							"/camera/depth/camera_info", 1));
 
 			depth_only_sync_ = boost::shared_ptr<DepthSync>(
-					new DepthSync(*sub_depth_, *sub_info_, 500));
+					new DepthSync(*sub_depth_, *sub_info_, 60));
 			depth_only_sync_->registerCallback(
 					boost::bind(&KinFuLSApp::execute, this, _1, _2,
 							sensor_msgs::ImageConstPtr()));
@@ -209,6 +209,8 @@ private:
 			const sensor_msgs::ImageConstPtr& rgb =
 					sensor_msgs::ImageConstPtr())
 	{
+		bool paint_image;
+
 		frame_counter_++;
 
 		if (kinfu_->icpIsLost())
@@ -221,55 +223,41 @@ private:
 		depth_device_.upload(&(depth->data[0]), depth->step, depth->height,
 				depth->width);
 
-//		if (integrate_colors_ && rgb)
-//			colors_device_.upload(&(rgb->data[0]), rgb->step, rgb->height,
-//					rgb->width);
+		if (integrate_colors_ && rgb)
+		{
+			rgb_device_.upload(&(rgb->data[0]), rgb->step, rgb->height,
+					rgb->width);
+			paint_image = true;
+		}
+		else
+			paint_image = false;
 
 		/*
 		 *      [fx  0 cx]
 		 * K = 	[ 0 fy cy]
-		 * 		[ 0  0  1]
+		 *      [ 0  0  1]
 		 */
-		const float focal_length = (cameraInfo->K[0] + cameraInfo->K[4]) / 2;
-
 		kinfu_->setDepthIntrinsics(cameraInfo->K[0], cameraInfo->K[4],
 				cameraInfo->K[2], cameraInfo->K[5]);
 
-		SampledScopeTime fps(time_ms_);
-		(*kinfu_)(depth_device_);
+		{
+			SampledScopeTime fps(time_ms_);
+
+			if (paint_image)
+				(*kinfu_)(depth_device_, rgb_device_);
+			else
+				(*kinfu_)(depth_device_);
+		}
 
 		if (kinfu_->isFinished())
 			nh_.shutdown();
 
-		publish_scene(depth->header.frame_id, 0);
+		publish_scene(depth->header.frame_id, paint_image, 0);
 		publish_pose(depth->header.stamp);
 
-		//save snapshots
-		if (enable_texture_extraction_)
-		{
-			if (frame_counter_ % snapshot_rate_ == 0)
-			{
+		if (enable_texture_extraction_ && frame_counter_ % snapshot_rate_ == 0)
+			save_snapshot(cameraInfo, rgb);
 
-				screenshot_manager_.setCameraIntrinsics(focal_length,
-						cameraInfo->height, cameraInfo->width);
-
-				//convert sensor_msgs::Image to pcl::gpu::PixelRGB
-				const unsigned int pixelCount = rgb->height * rgb->width;
-				pcl::gpu::kinfuLS::PixelRGB * pixelRgbs =
-						new pcl::gpu::kinfuLS::PixelRGB[pixelCount];
-				for (unsigned int i = 0; i < pixelCount; ++i)
-				{
-					//the encoding given in the image is "bgr8"
-					pixelRgbs[i].b = rgb->data[i * 3];
-					pixelRgbs[i].g = rgb->data[i * 3 + 1];
-					pixelRgbs[i].r = rgb->data[i * 3 + 2];
-				}
-				pcl::gpu::PtrStepSz<const pcl::gpu::kinfuLS::PixelRGB> rgb24(
-						rgb->height, rgb->width, pixelRgbs, rgb->step);
-				screenshot_manager_.saveImage(kinfu_->getCameraPose(), rgb24);
-				delete[] pixelRgbs;
-			}
-		}
 	}
 
 	void reconf_callback(kinfu::kinfu_Config &config, uint32_t level)
@@ -280,7 +268,8 @@ private:
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void publish_scene(const std::string &frame_id, const Eigen::Affine3f *pose)
+	void publish_scene(const std::string &frame_id, const bool paint_image,
+			const Eigen::Affine3f *pose)
 	{
 		sensor_msgs::Image msg;
 
@@ -294,16 +283,10 @@ private:
 			raycaster_->generateSceneView(view_device_);
 		}
 		else
-		{
 			kinfu_->getImage(view_device_);
-		}
 
-//		if (paint_image_ && registration_ && !has_pose)
-//		{
-//			colors_device_.upload(rgb24.data, rgb24.step, rgb24.rows,
-//					rgb24.cols);
-//			paint3DView(colors_device_, view_device_);
-//		}
+		if (paint_image && !pose)
+			pcl::device::kinfuLS::paint3DView(rgb_device_, view_device_);
 
 		//convert image to sensor message
 		msg.header.seq = frame_counter_;
@@ -341,10 +324,40 @@ private:
 
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+	void save_snapshot(const sensor_msgs::CameraInfoConstPtr& cameraInfo,
+			const sensor_msgs::ImageConstPtr& rgb)
+	{
+		const float focal_length = (cameraInfo->K[0] + cameraInfo->K[4]) / 2;
+
+		screenshot_manager_.setCameraIntrinsics(focal_length,
+				cameraInfo->height, cameraInfo->width);
+
+		//convert sensor_msgs::Image to pcl::gpu::PixelRGB
+		const unsigned int pixelCount = rgb->height * rgb->width;
+		pcl::gpu::kinfuLS::PixelRGB * pixelRgbs =
+				new pcl::gpu::kinfuLS::PixelRGB[pixelCount];
+
+		for (unsigned int i = 0; i < pixelCount; ++i)
+		{
+			//the encoding given in the image is "bgr8"
+			pixelRgbs[i].b = rgb->data[i * 3];
+			pixelRgbs[i].g = rgb->data[i * 3 + 1];
+			pixelRgbs[i].r = rgb->data[i * 3 + 2];
+		}
+
+		pcl::gpu::PtrStepSz<const pcl::gpu::kinfuLS::PixelRGB> rgb24(
+				rgb->height, rgb->width, pixelRgbs, rgb->step);
+		screenshot_manager_.saveImage(kinfu_->getCameraPose(), rgb24);
+
+		delete[] pixelRgbs;
+	}
+
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 	int frame_counter_;
 	int time_ms_;
 
-//	const bool integrate_colors_;
+	const bool integrate_colors_;
 	const bool enable_texture_extraction_;
 	const bool registration_;
 	const int snapshot_rate_;
@@ -353,7 +366,7 @@ private:
 	boost::shared_ptr<pcl::gpu::kinfuLS::RayCaster> raycaster_;
 
 	pcl::gpu::kinfuLS::KinfuTracker::DepthMap depth_device_;
-//	pcl::gpu::kinfuLS::KinfuTracker::View colors_device_;
+	pcl::gpu::kinfuLS::KinfuTracker::View rgb_device_;
 	pcl::gpu::kinfuLS::KinfuTracker::View view_device_;
 
 	pcl::kinfuLS::ScreenshotManager screenshot_manager_;
@@ -390,11 +403,14 @@ int print_cli_help()
 	std::cout << "    shifting_distance <in_meters>, sd : "
 			<< "define shifting threshold (distance target-point / cube center)"
 			<< std::endl;
-	std::cout << "    snapshot_rate <X_frames>, sr      : "
-			<< "Extract RGB textures every <X_frames>. Default: 45"
+	std::cout << "    integrate_colors, ic              : "
+			<< "Integrate color information (requires registered depth image). Default: false"
 			<< std::endl;
 	std::cout << "    extract_textures, et              : "
-			<< "extract RGB PNG images to KinFuSnapshots folder. Default: true"
+			<< "extract RGB PNG images to KinFuSnapshots folder. Default: false"
+			<< std::endl;
+	std::cout << "    snapshot_rate <X_frames>, sr      : "
+			<< "rate at which RGB PNG images are extracted (only if extract_textures=true). Default: 45"
 			<< std::endl;
 
 	return 0;
