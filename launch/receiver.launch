@@ -1,0 +1,6 @@
+<launch>
+  <node name="kinfu_viewer" pkg="image_view" type="image_view" output="screen">
+    <remap from="image" to="/camera/kinfuLS/depth" />
+    <param name="image_transport" value="libav" />
+  </node>
+</launch>
