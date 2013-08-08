@@ -1,6 +1,9 @@
 <launch>
   <group ns="camera">
-    <node name="camera" pkg="openni2_camera" type="openni2_camera_node" output="screen" />
+    <node name="camera" pkg="openni2_camera" type="openni2_camera_node" output="screen">
+      <param name="color_depth_synchronization" value="true" />
+    </node>
+
     <param name="depth/image_raw/libav/codec" value="ffv1" />
     <param name="depth/image_raw/libav/pixel_format" value="gray16" />
     <param name="rgb/image/libav/gop_size" value="10" />

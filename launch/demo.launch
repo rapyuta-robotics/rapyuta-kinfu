@@ -1,0 +1,34 @@
+<launch>
+  <arg name="mode" value="VGA_30Hz" />
+  
+  <!-- Frame rate - 15 <-> 1; 30 <-> 0 -->
+  <arg name="data_skip" value="1" />
+
+  <group ns="camera">
+    <node name="camera" pkg="openni2_camera" type="openni2_camera_node" output="screen">
+      <param name="color_depth_synchronization" value="true" />
+
+      <param name="color_mode" value="$(arg mode)" />
+      <param name="depth_mode" value="$(arg mode)" />
+
+      <param name="data_skip" value="$(arg data_skip)" />
+    </node>
+
+    <param name="depth/image_raw/libav/codec" value="ffv1" />
+    <param name="depth/image_raw/libav/pixel_format" value="gray16" />
+    <param name="rgb/image/libav/gop_size" value="10" />
+
+    <node name="rgb_viewer" pkg="image_view" type="image_view" output="screen">
+      <remap from="image" to="rgb/image" />
+    </node>
+
+    <node name="depth_viewer" pkg="image_view" type="image_view" output="screen">
+      <remap from="image" to="depth/image_raw" />
+    </node>
+
+    <node name="kinfu_viewer" pkg="image_view" type="image_view" output="screen">
+      <remap from="image" to="kinfuLS/depth" />
+      <param name="image_transport" value="libav" />
+    </node>
+  </group>
+</launch>
